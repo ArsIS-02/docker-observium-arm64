@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  db:
+    image: mariadb:10.11
+    container_name: observiumdb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - ./data:/var/lib/mysql
+    networks:
+      - observium-net
+
+  observium:
+    build: .
+    image: my-observium:latest
+    container_name: observiumapp
+    restart: unless-stopped
+    ports:
+      - "10001:80"
+    environment:
+      TZ: ${TZ}
+      OBSERVIUM_ADMIN_USER: ${OBSERVIUM_ADMIN_USER}
+      OBSERVIUM_ADMIN_PASS: ${OBSERVIUM_ADMIN_PASS}
+      OBSERVIUM_DB_HOST: db
+      OBSERVIUM_DB_USER: ${MYSQL_USER}
+      OBSERVIUM_DB_PASS: ${MYSQL_PASSWORD}
+      OBSERVIUM_DB_NAME: ${MYSQL_DATABASE}
+      OBSERVIUM_BASE_URL: ${OBSERVIUM_BASE_URL}
+    volumes:
+      - ./logs:/opt/observium/logs
+      - ./rrd:/opt/observium/rrd
+      - ./hosts:/etc/hosts
+    networks:
+      - observium-net
+    depends_on:
+      - db
+
+networks:
+  observium-net:
+    driver: bridge
