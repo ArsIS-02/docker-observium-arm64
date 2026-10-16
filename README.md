@@ -77,6 +77,7 @@ LLDP-соседей, и не требует писать тонну скрипт
 git clone https://github.com/ArsIS-02/docker-observium-arm64.git
 cd docker-observium-arm64
 
+cp .env.example .env
 nano .env                    # смени пароли и OBSERVIUM_BASE_URL!
 
 docker-compose up -d --build
@@ -102,8 +103,8 @@ Observium). Итоговый образ — `my-observium:latest`.
 | `docker-compose.yml` | Observium + MariaDB, порт 10001 |
 | `entrypoint.sh` | ожидание БД, импорт схемы, создание админа, discovery/poller |
 | `observium.cron` | расписание опроса: poller каждые 5 мин, discovery каждые 6 мин |
-| `snmpd.conf` | пример конфига snmpd для устройств под наблюдением |
-| `.env` | переменные окружения (шаблон) |
+| `snmpd.conf` | минимальный конфиг snmpd для устройств под наблюдением |
+| `.env.example` | шаблон переменных окружения (скопируй в `.env`) |
 | `data/ logs/ rrd/ hosts/` | тома (создаются при запуске) |
 
 `entrypoint.sh` при старте: ждёт MariaDB → подставляет параметры в `config.php` →
@@ -267,8 +268,8 @@ $config['autodiscovery']['ip_nets'] = array("192.168.1.0/24");
   ```
 - **`no matching manifest`** на ARM — потому и собираем образ сами (этот репозиторий).
 - **LLDP-соседи не видны** — в `snmpd.conf` не хватает `-V all`.
-- **`.env` в публичном репо** — не коммить реальные пароли; держи шаблон и добавь
-  `.env` в `.gitignore`.
+- **`.env` в публичном репо** — реальные секреты не коммитим: в репозитории лежит
+  шаблон `.env.example`, а локальный `.env` добавлен в `.gitignore`.
 
 ## Результат
 
