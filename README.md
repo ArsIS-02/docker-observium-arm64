@@ -1,126 +1,286 @@
 # docker-observium-arm64
 
-**Observium Community** в Docker для ARM64 (Raspberry Pi 4/5 и другие ARM-хосты).
+**Observium против зоопарка ОС** — домашний мониторинг сети на [Observium
+Community](https://www.observium.org/) в Docker для ARM64.
 
-Собирает и запускает [Observium Community](https://www.observium.org/) — систему
-сетевого мониторинга и учёта устройств по SNMP — в связке с MariaDB. Стек:
-Ubuntu 22.04 + Apache 2.4 + PHP 8.1 + SNMP + RRDtool.
+Собирает и запускает Observium — систему сетевого мониторинга по SNMP — в связке
+с MariaDB. Стек: Ubuntu 22.04 + Apache 2.4 + PHP 8.1 + SNMP + RRDtool. Работает
+на Raspberry Pi 4/5 и любых ARM64-хостах.
 
-## Что внутри
+## Зачем
 
-| Сервис | Роль | Образ |
-|---|---|---|
-| `observium` | веб-интерфейс, discovery и poller | собирается локально из `Dockerfile` |
-| `db` | база данных Observium | `mariadb:10.11` |
+Представь: ты работаешь из дома, а у тебя под контролем **12 устройств разной
+степени кривизны** — сервер на РЕД ОС, два Raspberry Pi, два Mac (Apple Silicon
+и Intel), машины с Windows 11 и Windows Server 2025, роутер Keenetic. Один
+Raspberry перегревается, Windows внезапно вырубает сетевой порт, Keenetic после
+обновления прошивки отбрасывает SNMP, а сервер падает раз в месяц — и узнаёшь ты
+об этом, только когда не можешь зайти в свой Git.
 
-Сервисы объединены в сеть `observium-net`; `observium` ждёт готовности БД через
-`depends_on` и проверку `mysql SELECT 1` в `entrypoint.sh`.
+Нужен единый «глаз», который видит всё и умеет:
+
+1. автоматически находить новые устройства;
+2. строить графики CPU, памяти и трафика за любой период;
+3. бить тревогу, когда что-то упало;
+4. рисовать карту сети (кто с кем соединён).
+
+Observium — та самая золотая середина: бесплатная Community Edition без лимита по
+устройствам, легковесная (живёт на Raspberry Pi), SNMP-центричная и с
+автообнаружением по LLDP. Но готовые Docker-образы не работают на ARM
+(`no matching manifest`) — поэтому образ приходится собирать самому. Этот
+репозиторий — готовый, работающий «из коробки» вариант.
+
+## Почему не Zabbix / Nagios / Prometheus
+
+| Инструмент | Вердикт |
+|---|---|
+| **Zabbix** | мощный, но настройка — отдельный вид спорта; для дома избыточен |
+| **LibreNMS** | форк Observium, похож; активнее сообщество |
+| **Nagios** | гибкий, но текстовые конфиги в 2026-м — архаика |
+| **Prometheus + Grafana** | стандарт для Kubernetes, но нужны экспортеры под всё |
+| **Cacti** | классические RRD-графики, но возможностей мало |
+| **PRTG / SolarWinds / Datadog** | мощные, но дорогие (и не все доступны в РФ) |
+
+![Интерфейс Zabbix](images/zabbix.png)
+
+![Дашборд Grafana](images/grafana.png)
+
+Observium занимает нишу «просто, мощно, бесплатно»: из коробки понимает тысячи
+MIB-файлов (Cisco, Juniper, Linux, Windows…), сам находит интерфейсы, сенсоры и
+LLDP-соседей, и не требует писать тонну скриптов.
+
+## Архитектура
+
+```
+┌──────────────┐  SNMP (UDP 161)   ┌─────────────────────────────┐
+│  устройства  │ ────────────────> │ Observium (Docker, ARM64)   │
+│ Linux/Windows│                   │  ├─ Apache + PHP 8.1        │
+│ macOS/Keenetic│                   │  ├─ discovery + poller      │
+└──────────────┘                   │  └─ MariaDB (отдельный)     │
+                                   └─────────────────────────────┘
+```
+
+Два контейнера: `observium` (веб + discovery/poller) и `db` (MariaDB 10.11),
+объединённые сетью `observium-net`. Observium опрашивает устройства по SNMP и
+хранит графики в RRD.
 
 ## Требования
 
-- хост на **ARM64** (Raspberry Pi 4/5 и т. п.);
+- хост на **ARM64** (Raspberry Pi 4/5; на x86_64 — поменяй базовый образ в
+  `Dockerfile` на `ubuntu:22.04`);
 - Docker и Docker Compose;
-- свободный порт **10001** (веб-интерфейс) — при необходимости поменяй в
-  `docker-compose.yml`.
+- 1–2 ГБ свободной RAM, несколько ГБ на диске;
+- свободный порт **10001** (веб-интерфейс).
 
 ## Быстрый старт
 
 ```bash
-# 1. клонируй репозиторий
 git clone https://github.com/ArsIS-02/docker-observium-arm64.git
 cd docker-observium-arm64
 
-# 2. настрой переменные (обязательно смени пароли!)
-nano .env
+nano .env                    # смени пароли и OBSERVIUM_BASE_URL!
 
-# 3. собери и запусти
 docker-compose up -d --build
-
-# 4. смотри логи
 docker-compose logs -f observium
 ```
 
 Веб-интерфейс: **http://<IP-хоста>:10001**
 
-## Настройка — файл `.env`
+![Сборка образа](images/build-log.png)
 
-| Переменная | Назначение | По умолчанию |
-|---|---|---|
-| `MYSQL_ROOT_PASSWORD` | пароль root MariaDB | `MyStr0ngP@ss` |
-| `MYSQL_USER` | пользователь БД Observium | `observium` |
-| `MYSQL_PASSWORD` | пароль пользователя БД | `BasePassword` |
-| `MYSQL_DATABASE` | имя БД | `observium` |
-| `TZ` | часовой пояс | `Asia/Yekaterinburg` |
-| `OBSERVIUM_ADMIN_USER` | логин администратора веб-интерфейса | `admin` |
-| `OBSERVIUM_ADMIN_PASS` | пароль администратора | `observium` |
-| `OBSERVIUM_BASE_URL` | внешний адрес веб-интерфейса | `http://192.168.1.148:10001` |
+![Общее время сборки](images/build-time.png)
 
-> ⚠️ Смени пароли и `OBSERVIUM_BASE_URL` на свои перед первым запуском.
+![Веб-интерфейс Observium](images/web-interface.png)
 
-## Структура репозитория
+Сборка занимает ~20 минут (скачивается базовый образ Ubuntu + пакеты + архив
+Observium). Итоговый образ — `my-observium:latest`.
+
+## Файлы
+
+| Файл | Назначение |
+|---|---|
+| `Dockerfile` | сборка Observium (Ubuntu 22.04 + Apache + PHP 8.1 + SNMP + RRDtool) |
+| `docker-compose.yml` | Observium + MariaDB, порт 10001 |
+| `entrypoint.sh` | ожидание БД, импорт схемы, создание админа, discovery/poller |
+| `observium.cron` | расписание опроса: poller каждые 5 мин, discovery каждые 6 мин |
+| `snmpd.conf` | пример конфига snmpd для устройств под наблюдением |
+| `.env` | переменные окружения (шаблон) |
+| `data/ logs/ rrd/ hosts/` | тома (создаются при запуске) |
+
+`entrypoint.sh` при старте: ждёт MariaDB → подставляет параметры в `config.php` →
+импортирует схему (если БД пуста) → создаёт администратора через `adduser.php` →
+запускает первый discovery и poller → стартует supervisor (Apache + cron).
+
+## Настройка SNMP на устройствах
+
+Observium общается с железом через SNMP — на каждом устройстве должен работать
+SNMP-агент. Ключевой момент: community `public` (или своя), и для карты сети —
+доступ ко всем MIB-веткам, включая LLDP.
+
+### Linux (РЕД ОС и др.)
+
+```bash
+# РЕД ОС / Fedora
+sudo dnf install net-snmp net-snmp-utils
+# Debian / Ubuntu
+sudo apt install snmpd snmp
+```
+
+Минимальный рабочий `/etc/snmp/snmpd.conf`:
 
 ```
-.
-├── Dockerfile            ← сборка Observium (Ubuntu 22.04 + Apache + PHP 8.1)
-├── docker-compose.yml    ← Observium + MariaDB
-├── entrypoint.sh         ← инициализация БД, создание админа, discovery/poller
-├── snmpd.conf            ← пример конфига snmpd (для устройств под наблюдением)
-├── .env                  ← переменные окружения (шаблон)
-└── data/ logs/ rrd/ hosts/   ← каталоги-тома, создаются при запуске
+rocommunity public default -V all
+syslocation "Yekaterinburg, Russia"
+syscontact admin@example.com
+dontLogTCPWrappersConnects yes
 ```
 
-Тома (в `docker-compose.yml`):
+> `-V all` даёт доступ ко всем MIB, включая LLDP, — без него Observium не увидит
+> соседей и не построит карту сети.
 
-| Том (хост) | Куда монтируется | Зачем |
-|---|---|---|
-| `./data` | `/var/lib/mysql` | данные MariaDB |
-| `./logs` | `/opt/observium/logs` | логи Observium |
-| `./rrd` | `/opt/observium/rrd` | RRD-базы графиков |
-| `./hosts` | `/etc/hosts` | статическое сопоставление имён |
+```bash
+sudo systemctl enable snmpd --now
+snmpwalk -v2c -c public localhost system
+```
 
-## Что делает `entrypoint.sh` при старте
+![Проверка SNMP в Linux](images/linux-snmpwalk.png)
 
-1. проверяет, что заданы переменные подключения к БД;
-2. ждёт готовности MariaDB (`mysql SELECT 1` в цикле);
-3. подставляет параметры БД в `config.php`;
-4. если таблиц нет — импортирует схему из `update/db_schema_mysql.sql`;
-5. создаёт/обновляет администратора через `adduser.php`;
-6. запускает первый `discovery` и `poller` в фоне;
-7. настраивает часовой пояс и запускает supervisor (Apache + cron).
+### Windows 10 / 11 / Server 2025
+
+SNMP по умолчанию не установлен. Ставим компонент через PowerShell (от
+администратора):
+
+```powershell
+Add-WindowsCapability -Online -Name "SNMP.Client~~~~0.0.1.0"
+Add-WindowsCapability -Online -Name "WMI-SNMPProvider.Client~~~~0.0.1.0"
+```
+
+Перезагрузка → `services.msc` → **SNMP Service** → вкладка **Security**:
+
+![Вкладка Security в свойствах SNMP Service](images/windows-snmp-security.png)
+
+- добавь community `public` с правами **Read Only**;
+- в списке **Accept SNMP packets from these hosts** укажи IP сервера Observium
+  (пустой список = принимать от всех, для домашней лаборатории сойдёт).
+
+![Добавление community public](images/windows-community.png)
+
+![Список разрешённых хостов](images/windows-hosts.png)
+
+### macOS
+
+SNMP-демон есть, но выключен. Включаем через `launchctl`:
+
+```bash
+sudo launchctl load -w /System/Library/LaunchDaemons/org.net-snmp.snmpd.plist
+```
+
+Конфиг `/etc/snmp/snmpd.conf` нужно создать вручную (по умолчанию его нет):
+
+```
+com2sec mynetwork 192.168.1.0/24 public
+rocommunity public default -V all
+syslocation "Yekaterinburg, Russia"
+```
+
+```bash
+sudo launchctl unload -w /System/Library/LaunchDaemons/org.net-snmp.snmpd.plist
+sudo launchctl load -w /System/Library/LaunchDaemons/org.net-snmp.snmpd.plist
+snmpwalk -v2c -c public localhost system
+```
+
+![Проверка SNMP в macOS](images/macos-snmpwalk.png)
+
+> В macOS нет многих MIB-файлов, поэтому часть OID недоступна. Для базовых метрик
+> CPU, памяти и сети этого достаточно.
+
+### Если SNMP не отвечает
+
+- **Порт 161 закрыт фаерволом:**
+  - Linux: `sudo firewall-cmd --add-port=161/udp --permanent && sudo firewall-cmd --reload`
+  - Windows: создай правило для входящего UDP 161.
+
+  ![Проверка UDP-порта 161](images/firewall-161.png)
+
+- **Community не совпадает** — везде должно быть одно значение (`public` или своё).
+- **Не указан разрешённый IP** (Windows и часть Linux) — в `snmpd.conf` можно
+  `rocommunity public <IP-сервера>` вместо `default`.
+- **Служба не запущена** — `systemctl status snmpd` / состояние службы в Windows.
 
 ## Добавление устройств
 
-Observium опрашивает устройства по SNMP, поэтому на каждом устройстве должен
-работать SNMP-агент с community-строкой. В качестве отправной точки подойдёт
-[`snmpd.conf`](snmpd.conf) из этого репозитория (стандартный пример ucd-snmp):
-скопируй его на устройство, задай community и `rocommunity`.
+### Через веб-интерфейс
 
-Дальше в веб-интерфейсе Observium: **Devices → Add Device** → указать IP/имя и
-SNMP-community. После этого Observium сам выполнит discovery и начнёт собирать
-данные.
+**Devices → Add Device** → укажи:
 
-## Диагностика
+- `Hostname` — IP или DNS-имя устройства;
+- `SNMP Community` — `public` (или своя);
+- `SNMP Version` — `v2c`.
+
+![Добавление устройства](images/add-device.png)
+
+![Настройки устройства](images/device-settings.png)
+
+![Список устройств](images/device-list.png)
+
+Данные подтянутся после первого poller-опроса (по умолчанию каждые 5 минут).
+Ускорить:
 
 ```bash
-# логи приложения
-docker-compose logs -f observium
-
-# зайти в контейнер с приложением
-docker exec -it observiumapp bash
-
-# проверить БД
-docker exec -it observiumdb mysql -uobservium -pBasePassword observium
-
-# пересобрать после правок
-docker-compose up -d --build
+docker exec observiumapp /opt/observium/discovery.php redos-raspi.monitoring.test -d
+docker exec observiumapp /opt/observium/poller.php -h redos-raspi.monitoring.test -f
 ```
 
-## Известные особенности
+![Графики устройства](images/device-graphs.png)
 
-- Сборка **только для ARM64** (базовый образ `arm64v8/ubuntu:22.04`). На x86_64
-  поменяй базовый образ в `Dockerfile` на `ubuntu:22.04`.
-- Observium Community скачивается с `observium.org` по HTTP (у сайта нет HTTPS
-  для этого пути) — если нужен строгий контроль целостности, скачай архив вручную
-  и положи в контекст сборки.
-- `snmpd` в контейнере установлен, но не запускается — он нужен для устройств
-  под наблюдением, а не для самого Observium.
+![Карточка устройства](images/device-card.png)
+
+### Через командную строку
+
+```bash
+# одно устройство
+docker exec observiumapp php /opt/observium/add_device.php <ip-адрес> public v2c
+
+# массово из файла devices.txt (по строке: IP community version)
+docker exec observiumapp php /opt/observium/add_device.php devices.txt
+```
+
+### Автообнаружение
+
+Observium сам находит LLDP/CDP-соседей, если в `config.php` включить:
+
+```php
+$config['autodiscovery']['xdp'] = TRUE;
+$config['autodiscovery']['ip_nets'] = array("192.168.1.0/24");
+```
+
+При следующем `discovery.php -h all` новые хосты добавятся сами. В разнородной
+среде автодiscovery не всегда идеален, поэтому ручное добавление — основной способ.
+
+![Автообнаружение LLDP-соседей](images/autodiscovery.png)
+
+## Грабли
+
+- **Графики не рисуются / ошибка на карточке** — права на RRD-каталог. Исправляется
+  одной командой:
+  ```bash
+  sudo chown -R 33:33 ./rrd
+  ```
+- **`no matching manifest`** на ARM — потому и собираем образ сами (этот репозиторий).
+- **LLDP-соседи не видны** — в `snmpd.conf` не хватает `-V all`.
+- **`.env` в публичном репо** — не коммить реальные пароли; держи шаблон и добавь
+  `.env` в `.gitignore`.
+
+## Результат
+
+12 устройств — от Raspberry Pi и Keenetic до Windows 11 и macOS — в одном дашборде.
+Графики CPU, памяти и трафика строятся сами, LLDP-соседи находятся, карта сети
+вырисовывается.
+
+![«Зоопарк» под контролем](images/result-zoo.png)
+
+## Что дальше
+
+- алерты по email / другим каналам;
+- интеграция Syslog — логи роутера и серверов прямо в Observium;
+- NetFlow/sFlow — кто жрёт трафик;
+- доработка карты сети вручную или через LLDP.
