@@ -102,14 +102,15 @@ Observium). Итоговый образ — `my-observium:latest`.
 | `Dockerfile` | сборка Observium (Ubuntu 22.04 + Apache + PHP 8.1 + SNMP + RRDtool) |
 | `docker-compose.yml` | Observium + MariaDB, порт 10001 |
 | `entrypoint.sh` | ожидание БД, импорт схемы, создание админа, discovery/poller |
-| `observium.cron` | расписание опроса: poller каждые 5 мин, discovery каждые 6 мин |
+| `observium.cron` | расписание опроса (от www-data): poller каждые 5 мин, discovery каждые 6 мин |
 | `snmpd.conf` | минимальный конфиг snmpd для устройств под наблюдением |
 | `.env.example` | шаблон переменных окружения (скопируй в `.env`) |
 | `data/ logs/ rrd/ hosts/` | тома (создаются при запуске) |
 
 `entrypoint.sh` при старте: ждёт MariaDB → подставляет параметры в `config.php` →
 импортирует схему (если БД пуста) → создаёт администратора через `adduser.php` →
-запускает первый discovery и poller → стартует supervisor (Apache + cron).
+выставляет права на `rrd/` и `logs/` для `www-data` → запускает первый discovery
+и poller **от `www-data`** → стартует supervisor (Apache + cron).
 
 ## Настройка SNMP на устройствах
 
@@ -261,8 +262,10 @@ $config['autodiscovery']['ip_nets'] = array("192.168.1.0/24");
 
 ## Грабли
 
-- **Графики не рисуются / ошибка на карточке** — права на RRD-каталог. Исправляется
-  одной командой:
+- **Графики не рисуются / ошибка на карточке** — раньше это был «танец с бубном»:
+  опрос запускался от `root`, и RRD-файлы получали неправильного владельца. Сейчас
+  discovery/poller работают от `www-data`, и права выставляются автоматически в
+  `entrypoint.sh`. Если обновляешь **старую** установку — приведи права один раз:
   ```bash
   sudo chown -R 33:33 ./rrd
   ```

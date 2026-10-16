@@ -52,10 +52,15 @@ if [ -n "${OBSERVIUM_ADMIN_USER}" ] && [ -n "${OBSERVIUM_ADMIN_PASS}" ]; then
     php /opt/observium/adduser.php "${OBSERVIUM_ADMIN_USER}" "${OBSERVIUM_ADMIN_PASS}" 10
 fi
 
+# discovery/poller и веб-сервер работают от www-data, чтобы RRD-файлы не
+# создавались от root (иначе графики не отрисуются и приходится вручную
+# делать chown на ./rrd). Приводим права на каталоги данных к www-data.
+chown -R www-data:www-data /opt/observium/rrd /opt/observium/logs
+
 echo "Запуск первоначального discovery..."
-php /opt/observium/discovery.php -u &
+su -s /bin/bash www-data -c "php /opt/observium/discovery.php -u" &
 echo "Запуск первоначального poller..."
-php /opt/observium/poller.php -h all &
+su -s /bin/bash www-data -c "php /opt/observium/poller.php -h all" &
 
 if [ -n "$TZ" ] && [ -f /usr/share/zoneinfo/$TZ ]; then
     echo "Настройка часового пояса: $TZ"

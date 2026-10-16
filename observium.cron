@@ -1,5 +1,6 @@
 # Опрос устройств Observium (cron в контейнере).
-# poller собирает метрики каждые 5 минут, discovery обновляет список
-# устройств и LLDP-соседей каждые 6 минут.
-*/5 * * * * root /opt/observium/poller.php -h all >> /dev/null 2>&1
-*/6 * * * * root /opt/observium/discovery.php -h all >> /dev/null 2>&1
+# Задачи выполняются от www-data, чтобы RRD-файлы имели правильного владельца
+# (иначе графики не отрисуются). poller собирает метрики каждые 5 минут,
+# discovery обновляет список устройств и LLDP-соседей каждые 6 минут.
+*/5 * * * * www-data /opt/observium/poller.php -h all >> /dev/null 2>&1
+*/6 * * * * www-data /opt/observium/discovery.php -h all >> /dev/null 2>&1
